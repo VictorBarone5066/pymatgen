@@ -245,6 +245,278 @@ class DosPlotter:
         plt = self.get_plot(xlim, ylim)
         plt.show()
 
+class LDosPlotter:
+    """
+    Class for plotting l-decomposed DOS.  Differs from other DOS 
+    plotters in that each atom's s, p, d components share the same 
+    color, but have different line styles.
+    
+    
+    Includes an auto-generated plot, which would be called like so:
+        #Initialize vasprun object, initialize LDosPlotter object 
+        v = Vasprun("vasprun.xml")
+        ex = plotter.LDosPlotter(v)
+        #Call the function itself
+        ex.AutoCreateGraph(v, save_path = "myGraph.pdf")
+    
+    
+    Or allows for more manual creation of plots:
+        #Initialize vasprun object, initialize LDosPlotter object
+        v = Vasprun("vasprun.xml")
+        ex = plotter.LDosPlotter(v)
+        
+        if(ex.IsLDecomposed(v)):  
+            #Add elements to the plot.  In this case, add all of them.  
+            #Sigma = (cubic) spline smoothing
+            for elem in ex.unique_elements:
+                ex.GetElementDosPlot(elem, sigma = 0.065)
+            
+          
+            #Customize the plot with whatever else you want    
+            plt.title("My Title")
+            plt.xlabel(r"$E-E_\mathrm{F}$ (eV)")
+            plt.ylabel("DOS (states / eV)")
+            test.GenerateLegend()
+            if(not ex.spin_pol):
+                plt.ylim(0)
+            
+            #Be cure to save (if necessary) and clear the plot when 
+            #done
+            plt.savefig("myGraph.pdf")
+            plt.clf()        
+    """
+    
+    # Non-standard import name to avoid ambiguity w/ the name 'plt'
+    from matplotlib import pyplot as mplt_  
+    from matplotlib.lines import Line2D  
+
+    complete_dos = None
+    unique_elements = []    
+    spin_pol = None
+    
+    # Colors to be used for plotting.  If there is 1 unique element, 
+    # colors[0] is used.  Otherwise, colors[1] thru colors[7] are used.
+    # If you somehow have more than 8 elements, the cycle will repeat
+    # for the 9th.
+    colors = [(0, 0, 0), # black
+              (255, 0, 0), # red
+              (0, 173, 0), # green
+              (0, 0, 255), # blue
+              (255, 0, 183), # pink
+              (15, 243, 255), # cyan
+              (235, 109, 0), # orange
+              (153, 0, 235) # purple
+              ]
+    color_index = 0
+    
+    # Line styles to use for s, p, d components
+    line_style = {'s': '-',
+                  'p': '--',
+                  'd': ':'
+                 }
+    # Lists holding legend data
+    atom_legend = []
+    style_legend = []
+    
+    def __init__(self, vasprun):
+        """
+        Args:
+            vasprun: A pymatgen.io.vasp Vasprun object
+        """
+        
+        # Initialize list of unique elements and their pdos if formatting
+        # is correct
+        if(self.IsLDecomposed(vasprun)):
+            for i in range(0, len(vasprun.complete_dos.structure.sites)):
+                counted = False
+                for j in range(0, len(self.unique_elements)):
+                    if(vasprun.complete_dos.structure.sites[i].species_string \
+                       == self.unique_elements[j].name):
+                        counted = True
+                        break
+                if(not counted):
+                    self.unique_elements.append(Element(vasprun.complete_dos.\
+                                                        structure.sites[i].\
+                                                        species_string))
+            
+            self.complete_dos = vasprun.complete_dos
+        else:
+            print("BadVasprunWarning:  The DOS info in your .xml file is not \
+                  formatted into s-p-d components.")
+    
+        # Determine if spin pol was used
+        self.spin_pol = self.IsSpinPolarized(vasprun)
+
+    def GetColor(self, i):
+        return (a / 255 for a in self.colors[i])
+    
+    def IsLDecomposed(self, vasprun):
+        if(vasprun.pdos == []):
+            return False
+        return True
+    
+    def IsSpinPolarized(self, vasprun):
+        return vasprun.is_spin
+    
+    def GetElementDosPlot(self, elements, sigma=0, scale_by_ef=True, 
+                          hide_s=False, hide_p=False, hide_d=False):
+        """
+        Adds specific element s-p-d DOS data to the current figure.  
+        Each element in the elements argument list will be assigned the 
+        same color, but different line styles.
+        
+        Args:
+            elements: list of pymatgen Element types.  
+            sigma: smearing factor to be given to get_smeared_densities.
+                   default = no smear
+            scale_by_ef: scale energy (x-axis) by the fermi energy.  
+                         default = true
+            hide_s: do not plot the s orbital.  default = false
+            hide_p: do not plot the p orbital.  default = false
+            hide_d: do not plot the d orbital.  default = false
+        """
+        
+        # Increment the color (or set to black if there is only one 
+        # element in the calculation)
+        self.color_index = (self.color_index + 1)%len(self.colors) if \
+        (len(self.unique_elements) > 1) else \
+        (self.color_index)%len(self.colors)
+        color = tuple(self.GetColor(self.color_index))   
+         
+        # For converting single elements to list
+        if(not isinstance(elements, list)):
+            elements = [elements]
+        
+        for element in elements:
+            # Add this element's entry to legend
+            self.atom_legend.append(self.Line2D([0], [0], color=color, 
+                                           lw=2, label=element.name))
+            
+            # Explicit Dos variables so that function calls are not too 
+            # long
+            s = (self.complete_dos.get_element_spd_dos(element)[OrbitalType.s])
+            p = (self.complete_dos.get_element_spd_dos(element)[OrbitalType.p])
+            d = (self.complete_dos.get_element_spd_dos(element)[OrbitalType.d])        
+            
+            
+            x = [e - s.efermi for e in s.energies] if scale_by_ef else s.efermi
+            # Adding dos sets to the plot
+            if(not hide_s):
+                style = self.line_style['s']
+                y = s.densities[Spin.up] if sigma <= 0 else \
+                s.get_smeared_densities(sigma)[Spin.up]
+                self.mplt_.plot(x, y, color=color, linestyle=str(style), 
+                                linewidth=.8)
+                # Plot spin-dn as negative if spin-pol was on
+                if(self.spin_pol):
+                   y = [-y for y in s.densities[Spin.down]] if sigma <= 0 else\
+                   [-y for y in s.get_smeared_densities(sigma)[Spin.down]]
+                   self.mplt_.plot(x, y, color=color, linestyle=str(style), 
+                            linewidth=.8)                 
+            if(not hide_p):
+                style = self.line_style['p']
+                y = p.densities[Spin.up] if sigma <= 0 else \
+                p.get_smeared_densities(sigma)[Spin.up]                
+                self.mplt_.plot(x, y, color=color, linestyle=str(style), 
+                                linewidth=.8)            
+                # Plot spin-dn as negative if spin-pol was on
+                if(self.spin_pol):
+                   y = [-y for y in p.densities[Spin.down]] if sigma <= 0 else\
+                   [-y for y in p.get_smeared_densities(sigma)[Spin.down]]
+                   self.mplt_.plot(x, y, color=color, linestyle=str(style), 
+                            linewidth=.8)
+            if(not hide_d):
+                style = self.line_style['d']
+                y = d.densities[Spin.up] if sigma <= 0 else \
+                d.get_smeared_densities(sigma)[Spin.up]                
+                self.mplt_.plot(x, y, color=color, linestyle=str(style), 
+                                linewidth=.8)        
+                # Plot spin-dn as negative if spin-pol was on
+                if(self.spin_pol):
+                   y = [-y for y in d.densities[Spin.down]] if sigma <= 0 else\
+                   [-y for y in d.get_smeared_densities(sigma)[Spin.down]]
+                   self.mplt_.plot(x, y, color=color, linestyle=str(style), 
+                            linewidth=.8)
+        return
+    
+    def GenerateLegend(self, atoms=True, line_styles=True):
+        """
+        Generates and places a legend on the current figure
+        
+        Args:
+            atoms: determine whether to add and element type legend.  
+                   default = true
+            line_styles: determine whether to add a line style legend.  
+                         default = true
+        """
+        
+        if(atoms):
+            first = self.mplt_.legend(handles = self.atom_legend, 
+                                      loc = "center", frameon=False, 
+                                      bbox_to_anchor=(1.068, 0.5))
+            self.mplt_.gca().add_artist(first)    
+        
+        if(line_styles):            
+            self.style_legend.append(self.Line2D([0], [0], color='k', lw=2, 
+                                            linestyle=self.line_style['s'], 
+                                            label='s'))
+            self.style_legend.append(self.Line2D([0], [0], color='k', lw=2, 
+                                            linestyle=self.line_style['p'], 
+                                            label='p'))
+            self.style_legend.append(self.Line2D([0], [0], color='k', lw=2, 
+                                            linestyle=self.line_style['d'], 
+                                            label='d'))
+            self.mplt_.legend(handles=self.style_legend, loc="center", 
+                              frameon=False, bbox_to_anchor=(1.065, .1))
+        
+        return
+    
+    def AutoCreateGraph(self, vasprun, x_lims=[None, None], 
+                        y_lims=[None, None], save_path="spdGraph.pdf"):
+        """
+        Automatically creates and saves a default graph for those who 
+        don't want to mess with plotting elements.
+        
+        Args:
+            vasprun: the Vasprun object from pymatgen.io.vasp
+            x_lims: list of [lower-bound, upper-bound] for the x-axis.  
+                    default = let matplotlib decide
+            y_lims: list of [lower-bound, upper-bound] for the y-axis.  
+                    default = [0, let matplotlib decide] for 
+                    spin-unpolarized, and let matplotlib decide for 
+                    spin-polarized (since spin-down is plotted as
+                    negative)
+            save_path: the full path includeing file name and type to 
+                       save the figure to.  default = ./spdGraph.pdf
+        """
+        
+        if(self.IsLDecomposed(vasprun)):  
+            # Add elements to the plot.  In this case, add all of them.
+            for elem in self.unique_elements:
+                self.GetElementDosPlot(elem)
+            
+          
+            # Plot Customization   
+            self.mplt_.xlabel(r"$E-E_\mathrm{F}$ (eV)")
+            self.mplt_.ylabel("DOS (states / eV)")
+            self.GenerateLegend()
+            if(x_lims[0] != None and x_lims[1] != None):
+                self.mplt_.xlim(x_lims[0], x_lims[1])
+            if(y_lims[0] != None and y_lims[1] != None):
+                self.mplt_.ylim(y_lims[0], y_lims[1])                
+            elif(not self.spin_pol):
+                self.mplt_.ylim(0)
+            
+            # Be cure to save (if necessary) and clear the plot when done
+            self.mplt_.savefig(save_path)
+            self.mplt_.clf() 
+            return
+        
+        else:
+            print("AutoCreateGraph:  Your .xml file does not contain s-p-d \
+                  components\n")
+            return
+
 
 class BSPlotter:
     """
