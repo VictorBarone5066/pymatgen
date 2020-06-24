@@ -15,9 +15,9 @@ from pymatgen.electronic_structure.core import Spin
 from pymatgen.electronic_structure.cohp import CompleteCohp
 from pymatgen.electronic_structure.dos import CompleteDos
 from pymatgen.electronic_structure.boltztrap import BoltztrapAnalyzer
-from pymatgen.electronic_structure.plotter import DosPlotter, BSPlotter, \
-    plot_ellipsoid, fold_point, plot_brillouin_zone, BSPlotterProjected, \
-    BSDOSPlotter, CohpPlotter, BoltztrapPlotter
+from pymatgen.electronic_structure.plotter import DosPlotter, LDosPlotter, \
+    BSPlotter, plot_ellipsoid, fold_point, plot_brillouin_zone, \
+    BSPlotterProjected, BSDOSPlotter, CohpPlotter, BoltztrapPlotter
 from pymatgen.electronic_structure.bandstructure import BandStructureSymmLine
 from pymatgen.core.structure import Structure
 from pymatgen.io.vasp import Vasprun
@@ -66,6 +66,51 @@ class DosPlotterTest(unittest.TestCase):
         self.assertTrue(os.path.isfile("dosplot.png"))
         os.remove("dosplot.png")
         plt.close("all")
+
+
+class LDosPlotterTest(unittest.TestCase):
+    from matplotlib import pyplot as mplt_
+    
+    # It would be nice to have v, inst inside setUp() but this causes the test 
+    # runs to take much longer than necessary.  If we do put v, inst inside
+    # setUp() later, be sure to set complete_dos and spin_pol = None, and 
+    # unique_elements = [] inside of tearDown() for completeness.  
+    v = Vasprun(os.path.join(test_dir, "vasprun.xml"))
+    inst = LDosPlotter(v)
+    
+    def setUp(self):
+        warnings.simplefilter("ignore")
+
+    def tearDown(self):
+        # Clean up the instance
+        self.inst.atom_legend = []
+        self.inst.style_legend = []
+        warnings.simplefilter("ignore")
+
+    def test_init(self):
+        self.assertIsNotNone(self.inst.complete_dos, "complete_dos should be \
+                             set by now")
+        self.assertEqual(len(self.inst.unique_elements), 4, "There should be 4\
+                         unique elements (Li, Fe, P, O)")
+        self.assertEqual(int(self.inst.spin_pol), 1, "Spin polarization should\
+                         be true")
+        
+    def test_get_element_dos_plot(self):
+        for elem in self.inst.unique_elements:
+            self.inst.GetElementDosPlot(elem)
+        self.mplt_.clf()
+        self.assertEqual(len(self.inst.atom_legend), 4, "There should be one \
+                         legend element for each unique element")
+        
+    def test_generate_legend(self):
+        self.inst.GenerateLegend()
+        self.assertEqual(len(self.inst.style_legend), 3, "There should be one \
+                         style legend entry for each (s, p, d)")
+        
+    def test_auto_create_graph(self):
+        self.inst.AutoCreateGraph(self.v, save_path = "ldosplot.png")
+        self.assertTrue(os.path.isfile("ldosplot.png"))
+        os.remove("ldosplot.png")
 
 
 class BSPlotterTest(unittest.TestCase):
